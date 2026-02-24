@@ -1,0 +1,175 @@
+---
+title: "NeSI Scripts"
+author: "Holly Gray"
+format: html
+editor: visual
+---
+
+## Basecalling
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+
+#SBATCH --account        massey03727
+#SBATCH --job-name       dorado
+#SBATCH --gpus-per-node  A100:1
+#SBATCH --mem            12G
+#SBATCH --cpus-per-task  6
+#SBATCH --time           24:00:00
+#SBATCH --output         dorado_basecaller.out
+#SBATCH --error         %x_%j.err
+
+#purge any other modules loaded in the background. This will avoid potential conflicts. Then load the required
+
+module purge
+module load Dorado/0.7.3
+
+dorado download --model dna_r10.4.1_e8.2_400bps_sup@v5.0.0
+
+#dorado basecaller <model> <reads> --kit-name <barcode-kit-name> > calls.bam
+dorado basecaller --device 'cuda:all' --min-qscore 10 --no-trim sup pod5/ > calls.bam
+```
+
+### Demultiplexing
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+
+#SBATCH --account        massey03727
+#SBATCH --job-name       dorado_demultiplex
+#SBATCH --mem            20G
+#SBATCH --cpus-per-task  16
+#SBATCH --time           08:00:00
+#SBATCH --output         dorado_demultiplex.out
+#SBATCH --error         %x_%j.err
+
+#purge any other modules loaded in the background. This will avoid potential conflicts. Then load the required
+
+module purge
+module load Dorado/0.7.3
+
+#dorado demux --output-dir <output-dir> --no-classify <input-bam>
+dorado demux --kit-name SQK-RBK114-24 --emit-fastq --output-dir Barcodes_fastq calls.bam
+```
+
+## Quality control
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+#SBATCH --account massey03727
+#SBATCH --job-name=filtlong # job name (shows up in the queue)
+#SBATCH --output=filtlong.log
+#SBATCH --time=24:00:00 # Walltime (HH:MM:SS)
+#SBATCH --cpus-per-task=4 # number of cpus/threads, stick to 2 for now
+#SBATCH --mem=20G            # RAM
+#SBATCH --error         %x_%j.err
+
+module purge
+
+module load Filtlong/0.2.0
+
+filtlong --min_length 1000 --keep_percent 90 --target_bases 500000000 <input.fastq> | gzip > <output_QC.fastq.gz>
+
+```
+
+## Assembly
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+#SBATCH --account massey03727
+#SBATCH --job-name=flye # job name (shows up in the queue)
+#SBATCH --output=flye.log
+#SBATCH --time=30:00:00 # Walltime (HH:MM:SS)
+#SBATCH --cpus-per-task=4 # number of cpus/threads, stick to 2 for now
+#SBATCH --mem=20G            # RAM
+#SBATCH --error         %x_%j.err
+
+module purge
+
+module load Flye/2.9.3-gimkl-2022a-Python-3.11.3
+
+flye --nano-hq output_QC.fastq.gz --genome-size 5m --out-dir <Isolate_ID>
+
+```
+
+## Polishing
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+#SBATCH --account=massey03727
+#SBATCH --job-name=medaka_test # job name (shows up in the queue)
+#SBATCH --output=%x.%j.out
+#SBATCH --error=%x.%j.err
+#SBATCH --mem=15G            # RAM
+#SBATCH --cpus-per-task=4    # number of cpus/threads
+#SBATCH --time=12:00:00      # Walltime (HH:MM:SS)
+
+
+# Load necessary modules
+module purge
+module load medaka/1.11.1-Miniconda3-22.11.1-1
+module load BWA/0.7.17-gimkl-2017a
+module load SAMtools/1.19-GCC-12.3.0
+module load minimap2/2.28-GCC-12.3.0
+
+# Set parameters
+input_file="STEC_phage_26Aug24.txt" # Path to the input text file
+output_dir="./Medaka"
+threads=4
+
+# Ensure the input file exists
+if [[ ! -f "$input_file" ]]; then
+    echo "Error: Input file '$input_file' not found!"
+    exit 1
+fi
+
+# Read the text file line by line
+while IFS=$'\t' read -r sample_id fasta_file long_read; do
+    if [[ -z "$sample_id" || -z "$fasta_file" || -z "$long_read" ]]; then
+        echo "Error: Missing data in line: $sample_id, $fasta_file, $long_read"
+        continue
+    fi
+
+    # Check if the files exist
+    if [[ ! -f "$fasta_file" ]]; then
+        echo "Error: FASTA file '$fasta_file' not found for sample '$sample_id'!"
+        continue
+    fi
+    if [[ ! -f "$long_read" ]]; then
+        echo "Error: Long read file '$long_read' not found for sample '$sample_id'!"
+        continue
+    fi
+
+    # Index the FASTA file
+    echo "Indexing FASTA file: $fasta_file"
+    samtools faidx "$fasta_file"
+
+    # Run Medaka consensus
+    echo "Running Medaka for sample: $sample_id"
+    medaka_consensus -i "$long_read" -d "$fasta_file" -o "${output_dir}/${sample_id}_medaka" -t "$threads"
+
+    # Move final polished assembly
+    if [[ -f "${output_dir}/${sample_id}_medaka/consensus.fasta" ]]; then
+        mv "${output_dir}/${sample_id}_medaka/consensus.fasta" "${output_dir}/${sample_id}_medaka.fasta"
+    else
+        echo "Warning: Medaka consensus failed for sample '$sample_id'. No consensus.fasta found."
+    fi
+done < "$input_file"
+```
+
+```{bash, eval=FALSE}
+
+```
+
+
+```{bash, eval=FALSE}
+
+```
+
+```{bash, eval=FALSE}
+
+```
+
+```{bash, eval=FALSE}
+
+```
