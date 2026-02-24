@@ -157,8 +157,132 @@ while IFS=$'\t' read -r sample_id fasta_file long_read; do
 done < "$input_file"
 ```
 
-```{bash, eval=FALSE}
+## Genome assembly statistics
 
+```{bash, eval=FALSE}
+#!/bin/bash -e
+#SBATCH --account massey03727
+#SBATCH --job-name=quast # job name (shows up in the queue)
+#SBATCH --output=quast.log
+#SBATCH --time=05:00:00 # Walltime (HH:MM:SS)
+#SBATCH --cpus-per-task=4 # number of cpus/threads, stick to 2 for now
+#SBATCH --mem=40G            # RAM
+#SBATCH --error         %x_%j.err
+
+module purge
+
+module load QUAST/5.2.0-gimkl-2022a
+
+quast.py *.fasta  -o quast_output
+```
+
+## MLST
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+
+#SBATCH --account       massey03727
+#SBATCH --job-name      mlst
+#SBATCH --time          02:10:00
+#SBATCH --mem           8GB
+#SBATCH --cpus-per-task 8
+#SBATCH --error         %x_%j.err
+#SBATCH --output        %x_%j.out
+
+module purge
+module load nullarbor/2.0.20191013
+
+mlst --csv --scheme ecoli *.fasta > all_mlst.csv
+```
+
+## SBI Typing
+
+The first step in this process is to create a database with the SBI relivant genes and the instertion products to determine the SBI type. This initial script was provided by Aline. 
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+#SBATCH --account=massey03727
+#SBATCH --job-name=abricate_db # job name (shows up in the queue)
+#SBATCH --output=slurmlog/%x.%j.out
+#SBATCH --error=%x.%j.err
+#SBATCH --mem=8G            # RAM
+#SBATCH --cpus-per-task=4 # number of cpus/threads, stick to 2 for now
+#SBATCH --time=05:00:00 # Walltime (HH:MM:SS)
+
+module purge
+module load ABRicate/1.0.0-GCC-11.3.0-Perl-5.34.1
+
+# make blast db
+# need to put your db inside a subdirectory
+mkdir /nesi/nobackup/massey03727/Objective_2_STEC/final_polished_assemblies/db/SBI_abricate_db
+
+cd /nesi/nobackup/massey03727/Objective_2_STEC/final_polished_assemblies/db/
+
+# need to name your fasta file as "sequences"
+# using my other database as an example here
+# copy CampyPlasmidtyping_abricate_20240710.fasta into CampyPlasmidtyping_abricate_20240710 directory, and rename fasta to 'sequences'
+cp insertionProducts.fa /nesi/nobackup/massey03727/Objective_2_STEC/final_polished_assemblies/db/SBI_abricate_db/insertionProducts.fa
+
+cd /nesi/nobackup/massey03727/Objective_2_STEC/final_polished_assemblies/db/SBI_abricate_db
+mv insertionProducts.fa sequences
+
+# make database
+# the -title flag doesn't actually seem to do anything - then db name used in abricate is actually the directory name
+makeblastdb -in sequences -title test -dbtype nucl -hash_index
+
+# view your available databases
+abricate --datadir /nesi/nobackup/massey03727/Objective_2_STEC/final_polished_assemblies/db/ --list
+
+# run abricate - db should be one of the ones listed in the above command
+#example with my plasmid database showing how I am going to use one isolate against the database I made
+#cd /nesi/nobackup/massey03742/Linda_database/
+#abricate --datadir /nesi/nobackup/massey03742/Linda_database/db/ --db CampyPlasmidtyping_abricate_20240710 SC0083_Contig_1_743.574_Circ.fasta
+
+```
+
+### Running Abricate with custom database
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+#SBATCH --account massey03727
+#SBATCH --job-name=abricate # job name (shows up in the queue)
+#SBATCH --output=abricate.log
+#SBATCH --time=02:00:00 # Walltime (HH:MM:SS)
+#SBATCH --cpus-per-task=4 # number of cpus/threads, stick to 2 for now
+#SBATCH --mem=20G            # RAM
+#SBATCH --error         %x_%j.err
+
+module purge
+
+module load ABRicate/1.0.0-GCC-11.3.0-Perl-5.34.1
+
+abricate --datadir /nesi/nobackup/massey03727/Objective_2_STEC/final_polished_assemblies/db/ --db SBI_abricate_db ../139_fasta_files/*.fasta > results.tab
+
+abricate --summary results.tab > summary.tab
+
+```
+
+## Genome annotation
+
+```{bash, eval=FALSE}
+#!/bin/bash -e
+#SBATCH --account massey03727
+#SBATCH --job-name=prokka # job name (shows up in the queue)
+#SBATCH --output=prokka.log
+#SBATCH --time=24:00:00 # Walltime (HH:MM:SS)
+#SBATCH --cpus-per-task=16 # number of cpus/threads, stick to 2 for now
+#SBATCH --mem=40G            # RAM
+#SBATCH --error         %x_%j.err
+
+module purge
+
+module load prokka/1.14.5-GCC-11.3.0
+
+mkdir -p prokka_results
+for F in *.fasta; do
+  N=$(basename "$F" .fasta)
+  prokka --genus Escherichia --cpus 16 --locustag "$N" --outdir prokka_results/"$N" --prefix "$N" "$F"
+done
 ```
 
 
@@ -166,9 +290,11 @@ done < "$input_file"
 
 ```
 
+
 ```{bash, eval=FALSE}
 
 ```
+
 
 ```{bash, eval=FALSE}
 
